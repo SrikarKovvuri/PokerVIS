@@ -28,9 +28,51 @@ const Home = () => {
   const [lastRaisePosition, setLastRaisePosition] = useState(-1);
   const [activePlayers, setActivePlayers] = useState(5);
   const [recommendation, setRecommendation] = useState('');
+  
+  // Card input states
+  const [card1Input, setCard1Input] = useState('');
+  const [card2Input, setCard2Input] = useState('');
+  const [showCardInput, setShowCardInput] = useState(false);
 
   const suits = ['♠', '♥', '♦', '♣'];
   const values = ['2', '3', '4', '5', '6', '7', '8', '9', '10', 'J', 'Q', 'K', 'A'];
+
+  // parse card input 
+  const parseCardInput = (input) => {
+    if (!input || input.length < 2) return null;
+    
+    let value = input.slice(0, -1).toUpperCase();
+    let suit = input.slice(-1).toLowerCase();
+    
+    
+    if (suit === 's') suit = '♠';
+    else if (suit === 'h') suit = '♥';
+    else if (suit === 'd') suit = '♦';
+    else if (suit === 'c') suit = '♣';
+    else return null;
+    
+    if (!values.includes(value)) return null;
+    
+    return `${value}${suit}`;
+  };
+
+  const updatePlayerCards = () => {
+    const card1 = parseCardInput(card1Input);
+    const card2 = parseCardInput(card2Input);
+    
+    if (!card1 || !card2) {
+      setGameMessage('Invalid card format. Use format like "Ah" for Ace of hearts, "2d" for 2 of diamonds, etc.');
+      return;
+    }
+    
+    const updatedPlayers = [...players];
+    updatedPlayers[MAIN_PLAYER_INDEX].cards = [card1, card2];
+    
+    setPlayers(updatedPlayers);
+    setShowCardInput(false);
+    
+    analyzeGameState(updatedPlayers, maxBet, potAmount, communityCards);
+  };
 
   const generateDeck = () => {
     let deck = [];
@@ -54,17 +96,28 @@ const Home = () => {
     const deck = generateDeck();
     let index = 0;
 
-    const newPlayers = players.map(player => {
-      const cards = [deck[index], deck[index + 1]];
-      index += 2;
-      return {
-        ...player,
-        cards,
-        isActive: true,
-        hasFolded: false,
-        hasActed: false,
-        bet: 0
-      };
+    const newPlayers = players.map((player, playerIndex) => {
+      if (playerIndex !== MAIN_PLAYER_INDEX) {
+        const cards = [deck[index], deck[index + 1]];
+        index += 2;
+        return {
+          ...player,
+          cards,
+          isActive: true,
+          hasFolded: false,
+          hasActed: false,
+          bet: 0
+        };
+      } else {
+        return {
+          ...player,
+          cards: player.cards,
+          isActive: true,
+          hasFolded: false,
+          hasActed: false,
+          bet: 0
+        };
+      }
     });
 
     setMaxBet(0);
@@ -74,6 +127,8 @@ const Home = () => {
     setPlayers(newPlayers);
     setRoundEnded(false);
     setRecommendation('');
+    setShowCardInput(true);
+    
     postBlinds(newPlayers);
 
     return { remainingDeck: deck.slice(index), dealtPlayers: newPlayers };
@@ -101,7 +156,8 @@ const Home = () => {
 
     setPlayers(updatedPlayers);
 
-    if (nextPlayer === MAIN_PLAYER_INDEX) {
+    if (nextPlayer === MAIN_PLAYER_INDEX && 
+        !updatedPlayers[MAIN_PLAYER_INDEX].cards.includes('🂠')) {
       analyzeGameState(updatedPlayers, maxBet, potAmount, communityCards);
     }
   };
@@ -122,6 +178,13 @@ const Home = () => {
   };
 
   const analyzeGameState = (playerList, currentMaxBet, pot, commCards) => {
+    // Only analyze if the main player has actual cards set
+    if (playerList[MAIN_PLAYER_INDEX].cards.includes('🂠')) {
+      setRecommendation("Please enter your cards first");
+      setShowCardInput(true);
+      return;
+    }
+
     const visibleCommCards = commCards.filter(card => card !== '🂠').join(' ');
     const holeCards = playerList[MAIN_PLAYER_INDEX].cards.join(' ');
     const stacks = playerList.map(player => player.balance).join(' ');
@@ -144,11 +207,7 @@ const Home = () => {
 
     axios.post(backendUrl, analysisData)
       .then(response => {
-        if (response.data && response.data.recommendation) {
-          setRecommendation(response.data.recommendation);
-        } else {
-          setRecommendation("Unable to get recommendation");
-        }
+        setRecommendation("The table has been analyzed. Check the display screen!");
       })
       .catch(error => {
         console.error("Error analyzing hand:", error);
@@ -398,9 +457,13 @@ const Home = () => {
         const updatedPlayers = players.map((player, index) => {
           if (player.hasFolded) return player;
           if (index === MAIN_PLAYER_INDEX) {
-            return { ...player, cards: [deck[5], deck[6]] };
+            return player; 
           }
-          return player;
+       
+          return { 
+            ...player, 
+            cards: [deck[5 + (index-1)*2], deck[5 + (index-1)*2 + 1]] 
+          };
         });
 
         const active = updatedPlayers.filter(p => !p.hasFolded);
@@ -445,6 +508,8 @@ const Home = () => {
     setMaxBet(0);
     setRoundEnded(false);
     setRecommendation('');
+    setCard1Input('');
+    setCard2Input('');
 
     dealCards();
   };
@@ -518,6 +583,38 @@ const Home = () => {
           ) : null}
         </div>
 
+        {showCardInput && (
+          <div className="bg-blue-800 p-3 rounded-lg mb-3">
+            <h4 className="text-center mb-2">Enter your cards (e.g. As for Ace of spades, Kh for King of hearts)</h4>
+            <div className="flex justify-center gap-3 mb-3">
+              <input
+                type="text"
+                value={card1Input}
+                onChange={(e) => setCard1Input(e.target.value)}
+                placeholder="First card (e.g. Ah)"
+                maxLength="3"
+                className="px-3 py-2 rounded text-black w-24 text-center"
+              />
+              <input
+                type="text"
+                value={card2Input}
+                onChange={(e) => setCard2Input(e.target.value)}
+                placeholder="Second card (e.g. Kd)"
+                maxLength="3"
+                className="px-3 py-2 rounded text-black w-24 text-center"
+              />
+            </div>
+            <div className="flex justify-center">
+              <button
+                onClick={updatePlayerCards}
+                className="bg-green-600 hover:bg-green-700 px-4 py-2 rounded"
+              >
+                Set Cards
+              </button>
+            </div>
+          </div>
+        )}
+
         <div className="flex justify-center gap-4">
           {players[MAIN_PLAYER_INDEX].cards.map((card, cardIndex) => (
             <div
@@ -529,6 +626,17 @@ const Home = () => {
             </div>
           ))}
         </div>
+        
+        {!showCardInput && players[MAIN_PLAYER_INDEX].cards.includes('🂠') && (
+          <div className="text-center mt-3">
+            <button
+              onClick={() => setShowCardInput(true)}
+              className="bg-blue-600 hover:bg-blue-700 px-4 py-1 rounded text-sm"
+            >
+              Change Cards
+            </button>
+          </div>
+        )}
       </div>
 
       <div className="grid grid-cols-1 md:grid-cols-4 gap-4 mb-6">
