@@ -13,6 +13,7 @@ const Home = () => {
   ];
 
   const [communityCards, setCommunityCards] = useState(['🂠', '🂠', '🂠', '🂠', '🂠']);
+  const [communityCardsApi, setCommunityCardsApi] = useState(['', '', '', '', '']);
   const [players, setPlayers] = useState(initialPlayers);
   const [currentPlayer, setCurrentPlayer] = useState(0);
   const [potAmount, setPotAmount] = useState(0);
@@ -28,55 +29,131 @@ const Home = () => {
   const [lastRaisePosition, setLastRaisePosition] = useState(-1);
   const [activePlayers, setActivePlayers] = useState(5);
   const [recommendation, setRecommendation] = useState('');
-  
+
   // Card input states
   const [card1Input, setCard1Input] = useState('');
   const [card2Input, setCard2Input] = useState('');
   const [showCardInput, setShowCardInput] = useState(false);
+  const [communityCardInputs, setCommunityCardInputs] = useState(['', '', '', '', '']);
+  const [showCommunityCardInput, setShowCommunityCardInput] = useState(false);
 
   const suits = ['♠', '♥', '♦', '♣'];
   const values = ['2', '3', '4', '5', '6', '7', '8', '9', '10', 'J', 'Q', 'K', 'A'];
 
-  // parse card input 
+  const displayToApiSuit = {
+    '♠': 's',
+    '♥': 'h',
+    '♦': 'd',
+    '♣': 'c'
+  };
+
+  const apiToDisplaySuit = {
+    's': '♠',
+    'h': '♥',
+    'd': '♦',
+    'c': '♣'
+  };
+
+  // Parse card input (e.g., "Ad" -> "Ad" for API, "A♦" for display)
   const parseCardInput = (input) => {
     if (!input || input.length < 2) return null;
-    
+
+    // Extract value and suit
     let value = input.slice(0, -1).toUpperCase();
     let suit = input.slice(-1).toLowerCase();
-    
-    
-    if (suit === 's') suit = '♠';
-    else if (suit === 'h') suit = '♥';
-    else if (suit === 'd') suit = '♦';
-    else if (suit === 'c') suit = '♣';
-    else return null;
-    
+
+    // Validate the suit
+    if (!['s', 'h', 'd', 'c'].includes(suit)) return null;
+
+    // Validate the value
     if (!values.includes(value)) return null;
-    
+
+    // Return in the format expected by the API (e.g., "As")
     return `${value}${suit}`;
   };
 
+  const getCardSymbol = (card) => {
+    if (card === '🂠' || card === '') return '🂠';
+
+    // Parse the card (format: "As", "Kh", etc.)
+    const value = card.slice(0, -1); // Get value (A, K, etc.)
+    const suit = card.slice(-1); // Get suit (s, h, etc.)
+
+    // Convert the suit to a symbol
+    const suitSymbol = apiToDisplaySuit[suit] || suit;
+
+    // Return the formatted card
+    return `${value}${suitSymbol}`;
+  };
+
+  // Update player's cards based on manual input
   const updatePlayerCards = () => {
     const card1 = parseCardInput(card1Input);
     const card2 = parseCardInput(card2Input);
-    
+
     if (!card1 || !card2) {
-      setGameMessage('Invalid card format. Use format like "Ah" for Ace of hearts, "2d" for 2 of diamonds, etc.');
+      setGameMessage('Invalid card format. Use format like "As" for Ace of spades, "Kh" for King of hearts, etc.');
       return;
     }
-    
+
     const updatedPlayers = [...players];
     updatedPlayers[MAIN_PLAYER_INDEX].cards = [card1, card2];
-    
+
     setPlayers(updatedPlayers);
     setShowCardInput(false);
+
+    // Trigger analysis with new cards
+    analyzeGameState(updatedPlayers, maxBet, potAmount, communityCardsApi);
+  };
+
+  // Update community cards based on manual input
+  const updateCommunityCards = () => {
+    const parsedCards = communityCardInputs.map(input => parseCardInput(input));
     
-    analyzeGameState(updatedPlayers, maxBet, potAmount, communityCards);
+    // Check if any entered card is invalid
+    if (parsedCards.some((card, index) => {
+      // Only validate cards that have input (not empty)
+      if (communityCardInputs[index] && !card) return true;
+      return false;
+    })) {
+      setGameMessage('Invalid card format in community cards. Use format like "As" for Ace of spades, "Kh" for King of hearts, etc.');
+      return;
+    }
+  
+    // Update display cards
+    const newDisplayCards = parsedCards.map((card, index) => 
+      card ? getCardSymbol(card) : '🂠'
+    );
+  
+    // Update API format cards (empty string for unset cards)
+    const newApiCards = parsedCards.map(card => card || '');
+  
+    setCommunityCards(newDisplayCards);
+    setCommunityCardsApi(newApiCards);
+    setShowCommunityCardInput(false);
+  
+    // Show appropriate message based on game stage
+    switch (gameStage) {
+      case 'flop':
+        setGameMessage('Flop cards set. Betting starts.');
+        break;
+      case 'turn':
+        setGameMessage('Turn card set. Betting starts.');
+        break;
+      case 'river':
+        setGameMessage('River card set. Final betting round.');
+        break;
+    }
+  
+    // Trigger analysis if it's the main player's turn
+    if (currentPlayer === MAIN_PLAYER_INDEX) {
+      analyzeGameState(players, maxBet, potAmount, newApiCards);
+    }
   };
 
   const generateDeck = () => {
     let deck = [];
-    for (let suit of suits) {
+    for (let suit of Object.values(apiToDisplaySuit)) {
       for (let value of values) {
         deck.push(`${value}${suit}`);
       }
@@ -97,6 +174,7 @@ const Home = () => {
     let index = 0;
 
     const newPlayers = players.map((player, playerIndex) => {
+      // Only deal random cards to non-main players
       if (playerIndex !== MAIN_PLAYER_INDEX) {
         const cards = [deck[index], deck[index + 1]];
         index += 2;
@@ -109,9 +187,10 @@ const Home = () => {
           bet: 0
         };
       } else {
+        // Main player gets placeholder cards
         return {
           ...player,
-          cards: player.cards,
+          cards: ['🂠', '🂠'],
           isActive: true,
           hasFolded: false,
           hasActed: false,
@@ -124,15 +203,23 @@ const Home = () => {
     setLastRaisePosition(-1);
     setActivePlayers(players.length);
     setCommunityCards(['🂠', '🂠', '🂠', '🂠', '🂠']);
+    setCommunityCardsApi(['', '', '', '', '']);
+    setCommunityCardInputs(['', '', '', '', '']);
     setPlayers(newPlayers);
     setRoundEnded(false);
     setRecommendation('');
     setShowCardInput(true);
-    
+    setShowCommunityCardInput(true);
+
     postBlinds(newPlayers);
 
     return { remainingDeck: deck.slice(index), dealtPlayers: newPlayers };
   };
+
+
+
+
+
 
   const postBlinds = (newPlayers) => {
     const updatedPlayers = [...newPlayers];
@@ -156,9 +243,11 @@ const Home = () => {
 
     setPlayers(updatedPlayers);
 
-    if (nextPlayer === MAIN_PLAYER_INDEX && 
-        !updatedPlayers[MAIN_PLAYER_INDEX].cards.includes('🂠')) {
-      analyzeGameState(updatedPlayers, maxBet, potAmount, communityCards);
+    // If it's the main player's turn and cards have been manually entered, analyze
+    if (nextPlayer === MAIN_PLAYER_INDEX &&
+      updatedPlayers[MAIN_PLAYER_INDEX].cards[0] !== '🂠' &&
+      updatedPlayers[MAIN_PLAYER_INDEX].cards[0] !== '') {
+        analyzeGameState(updatedPlayers, maxBet, potAmount, communityCardsApi);
     }
   };
 
@@ -173,47 +262,61 @@ const Home = () => {
       currentIndex = (currentIndex + 1) % playerList.length;
       count++;
     }
-
     return -1;
   };
 
   const analyzeGameState = (playerList, currentMaxBet, pot, commCards) => {
     // Only analyze if the main player has actual cards set
-    if (playerList[MAIN_PLAYER_INDEX].cards.includes('🂠')) {
+    if (playerList[MAIN_PLAYER_INDEX].cards[0] === '🂠' || playerList[MAIN_PLAYER_INDEX].cards[0] === '') {
       setRecommendation("Please enter your cards first");
       setShowCardInput(true);
       return;
     }
 
-    const visibleCommCards = commCards.filter(card => card !== '🂠').join(' ');
+    // Filter out placeholder cards from community cards
+    const visibleCommCards = commCards.filter(card => card !== '🂠' && card !== '').join(' ');
+
+    // Get hole cards
     const holeCards = playerList[MAIN_PLAYER_INDEX].cards.join(' ');
+
+    // Get stack sizes and positions
     const stacks = playerList.map(player => player.balance).join(' ');
     const positions = playerList.map(player => player.position).join(' ');
+
+    // Calculate minimum raise
     const minRaise = Math.max(blindAmount * 2, currentMaxBet * 2);
 
+    // Prepare data for analysis
     const analysisData = {
-      holeCards,
-      communityCards: visibleCommCards,
-      stacks,
-      positions,
-      potSize: pot,
-      facingBet: currentMaxBet,
-      minRaise,
-      simulations: 5000
+      holeCards: String(holeCards),
+      communityCards: String(visibleCommCards),
+      stacks: String(stacks),
+      positions: String(positions),
+      potSize: String(pot),
+      facingBet: String(currentMaxBet),
+      minRaise: String(minRaise),
+      simulations: String(5000)
     };
+
+    // Log the data being sent for debugging
+    console.log("Sending to API:", analysisData);
 
     const backendUrl = 'http://localhost:5000/analyze';
     setRecommendation("Analyzing hand...");
 
     axios.post(backendUrl, analysisData)
-      .then(response => {
-        setRecommendation("The table has been analyzed. Check the display screen!");
-      })
-      .catch(error => {
-        console.error("Error analyzing hand:", error);
-        setRecommendation("Error analyzing hand. Please try again.");
-      });
+    .then(response => {
+      console.log("API Response:", response.data);
+      setRecommendation("The table has been analyzed. Check the display screen!");
+    })
+    .catch(error => {
+      const errorMsg = error.response?.data?.error || "Please try again.";
+      console.error("Backend error:", errorMsg);
+      setRecommendation(`Error: ${errorMsg}`);
+    });
   };
+
+
 
   const placeBet = () => {
     if (!betAmount || isNaN(betAmount) || parseInt(betAmount) <= 0) {
@@ -272,11 +375,13 @@ const Home = () => {
 
       if (nextPlayerIndex === MAIN_PLAYER_INDEX) {
         setTimeout(() => {
-          analyzeGameState(updatedPlayers, maxBet, potAmount, communityCards);
+          analyzeGameState(updatedPlayers, maxBet, potAmount, communityCardsApi);
         }, 500);
       }
     }
   };
+
+
 
   const findNextActivePlayerInBettingRound = (playerList) => {
     let nextIndex = (currentPlayer + 1) % playerList.length;
@@ -292,6 +397,7 @@ const Home = () => {
 
     return -1;
   };
+
 
   const check = () => {
     if (maxBet > 0 && players[currentPlayer].bet < maxBet) {
@@ -312,18 +418,19 @@ const Home = () => {
 
     if (nextPlayerIndex === -1) {
       setTimeout(() => {
-        advanceStage();
+      advanceStage();
       }, 1500);
     } else {
       setCurrentPlayer(nextPlayerIndex);
 
       if (nextPlayerIndex === MAIN_PLAYER_INDEX) {
         setTimeout(() => {
-          analyzeGameState(updatedPlayers, maxBet, potAmount, communityCards);
+        analyzeGameState(updatedPlayers, maxBet, potAmount, communityCardsApi);
         }, 500);
       }
     }
   };
+
 
   const call = () => {
     const currentBet = players[currentPlayer].bet;
@@ -359,11 +466,13 @@ const Home = () => {
 
       if (nextPlayerIndex === MAIN_PLAYER_INDEX) {
         setTimeout(() => {
-          analyzeGameState(updatedPlayers, maxBet, potAmount, communityCards);
+          analyzeGameState(updatedPlayers, maxBet, potAmount, communityCardsApi);
         }, 500);
       }
     }
   };
+
+
 
   const fold = () => {
     const updatedPlayers = [...players];
@@ -405,11 +514,12 @@ const Home = () => {
 
       if (nextPlayerIndex === MAIN_PLAYER_INDEX) {
         setTimeout(() => {
-          analyzeGameState(updatedPlayers, maxBet, potAmount, communityCards);
+          analyzeGameState(updatedPlayers, maxBet, potAmount, communityCardsApi);
         }, 500);
       }
     }
   };
+
 
   const resetBettingRound = () => {
     const updatedPlayers = [...players];
@@ -425,67 +535,89 @@ const Home = () => {
 
     if (nextPlayer === MAIN_PLAYER_INDEX) {
       setTimeout(() => {
-        analyzeGameState(updatedPlayers, maxBet, potAmount, communityCards);
+        analyzeGameState(updatedPlayers, maxBet, potAmount, communityCardsApi);
       }, 500);
     }
   };
 
   const advanceStage = () => {
-    const deck = generateDeck();
     resetBettingRound();
-
+  
     switch (gameStage) {
       case 'pre-flop':
-        setCommunityCards([deck[0], deck[1], deck[2], '🂠', '🂠']);
+        // For flop - show input for 3 cards
+        setCommunityCards(['🂠', '🂠', '🂠', '🂠', '🂠']);
+        setCommunityCardsApi(['', '', '', '', '']);
+        setCommunityCardInputs(['', '', '', '', '']);
+        setShowCommunityCardInput(true);
         setGameStage('flop');
-        setGameMessage('Flop revealed. Betting starts.');
+        setGameMessage('Please enter the flop cards (first 3 community cards)');
         break;
-
+  
       case 'flop':
-        setCommunityCards(prevCards => [prevCards[0], prevCards[1], prevCards[2], deck[3], '🂠']);
+        // For turn - show input for 4th card
+        // Only allow input if we have at least 3 valid cards
+        if (communityCardsApi.filter(card => card !== '').length < 3) {
+          setGameMessage('Please set all flop cards before proceeding to turn');
+          return;
+        }
+        setShowCommunityCardInput(true);
         setGameStage('turn');
-        setGameMessage('Turn card revealed. Betting starts.');
+        setGameMessage('Please enter the turn card (4th community card)');
         break;
-
+  
       case 'turn':
-        setCommunityCards(prevCards => [prevCards[0], prevCards[1], prevCards[2], prevCards[3], deck[4]]);
+        // For river - show input for 5th card
+        // Only allow input if we have 4 valid cards
+        if (communityCardsApi.filter(card => card !== '').length < 4) {
+          setGameMessage('Please set the turn card before proceeding to river');
+          return;
+        }
+        setShowCommunityCardInput(true);
         setGameStage('river');
-        setGameMessage('River card revealed. Final betting round.');
+        setGameMessage('Please enter the river card (5th community card)');
         break;
-
+  
       case 'river':
+        // For showdown - check we have all 5 cards
+        if (communityCardsApi.filter(card => card !== '').length < 5) {
+          setGameMessage('Please set all community cards before showdown');
+          return;
+        }
+  
         const updatedPlayers = players.map((player, index) => {
           if (player.hasFolded) return player;
           if (index === MAIN_PLAYER_INDEX) {
-            return player; 
+            return player; // Keep main player's cards as manually entered
           }
-       
-          return { 
-            ...player, 
-            cards: [deck[5 + (index-1)*2], deck[5 + (index-1)*2 + 1]] 
+          // Generate random cards for other players (for display only)
+          const deck = generateDeck();
+          return {
+            ...player,
+            cards: [deck[0], deck[1]]
           };
         });
-
+  
         const active = updatedPlayers.filter(p => !p.hasFolded);
         const winner = active.find(p => p.id === players[MAIN_PLAYER_INDEX].id) ||
-                       active[Math.floor(Math.random() * active.length)];
-
+                      active[Math.floor(Math.random() * active.length)];
+  
         winner.balance += potAmount;
-
+  
         setPlayers(updatedPlayers);
         setGameStage('showdown');
         setGameMessage(`Showdown! ${winner.name} wins the pot of $${potAmount}!`);
         setRoundEnded(true);
-
+  
         setTimeout(() => {
           resetGame();
         }, 5000);
         break;
-
+  
       case 'showdown':
         resetGame();
         break;
-
+  
       default:
         break;
     }
@@ -502,6 +634,7 @@ const Home = () => {
     setBigBlindPosition(newBigBlindPosition);
 
     setCommunityCards(['🂠', '🂠', '🂠', '🂠', '🂠']);
+    setCommunityCardsApi(['', '', '', '', '']);
     setPotAmount(0);
     setGameStage('pre-flop');
     setBetAmount('');
@@ -521,13 +654,15 @@ const Home = () => {
   return (
     <div className="min-h-screen bg-green-800 p-6 text-white">
       <h1 className="text-3xl font-bold mb-6 text-center">Poker Assistant</h1>
-
+  
       <div className="bg-green-900 p-4 rounded-lg mb-6">
         <div className="flex justify-between mb-4">
           <div>
             <p className="text-xl">Stage: {gameStage}</p>
             <p className="text-lg">Current Player: {players[currentPlayer]?.name}</p>
-            <p className="text-sm">Dealer: {players[dealerPosition]?.name} | SB: {players[smallBlindPosition]?.name} | BB: {players[bigBlindPosition]?.name}</p>
+            <p className="text-sm">
+              Dealer: {players[dealerPosition]?.name} | SB: {players[smallBlindPosition]?.name} | BB: {players[bigBlindPosition]?.name}
+            </p>
           </div>
           <div>
             <p className="text-xl">Pot: ${potAmount}</p>
@@ -536,29 +671,79 @@ const Home = () => {
         </div>
         <p className="bg-green-700 p-2 rounded">{gameMessage}</p>
       </div>
-
+  
       {currentPlayer === MAIN_PLAYER_INDEX && recommendation && (
         <div className="bg-blue-900 p-4 rounded-lg mb-6 border-2 border-yellow-400">
           <h2 className="text-xl mb-2 text-center font-bold">Assistant Recommendation</h2>
           <p className="text-lg text-center">{recommendation}</p>
         </div>
       )}
-
+  
       <div className="bg-green-700 p-4 mb-6 rounded-lg">
-        <h2 className="text-xl mb-2 text-center">Community Cards</h2>
-        <div className="flex justify-center gap-2">
-          {communityCards.map((card, index) => (
-            <div
-              key={index}
-              className={`bg-white text-black h-20 w-14 rounded-md flex items-center justify-center text-2xl
-                ${card.includes('♥') || card.includes('♦') ? 'text-red-600' : 'text-black'}`}
+        <div className="flex justify-between items-center mb-2">
+          <h2 className="text-xl">Community Cards</h2>
+          {!showCommunityCardInput && (
+            <button
+              onClick={() => setShowCommunityCardInput(true)}
+              className="bg-blue-600 hover:bg-blue-700 px-3 py-1 rounded text-sm"
             >
-              {card}
-            </div>
-          ))}
+              Edit Cards
+            </button>
+          )}
         </div>
+  
+        {showCommunityCardInput ? (
+          <div className="bg-blue-800 p-3 rounded-lg mb-3">
+            <h4 className="text-center mb-2">
+              Enter community cards (e.g. As for Ace of spades, Kh for King of hearts)
+            </h4>
+            <div className="flex justify-center gap-2 mb-3 flex-wrap">
+              {communityCardInputs.map((card, index) => (
+                <input
+                  key={index}
+                  type="text"
+                  value={card}
+                  onChange={(e) => {
+                    const newInputs = [...communityCardInputs];
+                    newInputs[index] = e.target.value;
+                    setCommunityCardInputs(newInputs);
+                  }}
+                  placeholder={`Card ${index + 1}`}
+                  maxLength="3"
+                  className="px-2 py-1 rounded text-black w-20 text-center"
+                />
+              ))}
+            </div>
+            <div className="flex justify-center gap-3">
+              <button
+                onClick={updateCommunityCards}
+                className="bg-green-600 hover:bg-green-700 px-4 py-2 rounded"
+              >
+                Set Cards
+              </button>
+              <button
+                onClick={() => setShowCommunityCardInput(false)}
+                className="bg-gray-600 hover:bg-gray-700 px-4 py-2 rounded"
+              >
+                Cancel
+              </button>
+            </div>
+          </div>
+        ) : (
+          <div className="flex justify-center gap-2">
+            {communityCards.map((card, index) => (
+              <div
+                key={index}
+                className={`bg-white text-black h-20 w-14 rounded-md flex items-center justify-center text-2xl
+                  ${card.includes('♥') || card.includes('♦') ? 'text-red-600' : 'text-black'}`}
+              >
+                {card}
+              </div>
+            ))}
+          </div>
+        )}
       </div>
-
+  
       <div className={`bg-green-900 p-4 rounded-lg mb-6 border-4 ${currentPlayer === MAIN_PLAYER_INDEX && !roundEnded ? 'border-yellow-400' : 'border-blue-800'}`}>
         <div className="flex justify-between mb-2">
           <h3 className="text-xl font-bold">
@@ -569,29 +754,27 @@ const Home = () => {
           </h3>
           <p className="text-lg">Balance: ${players[MAIN_PLAYER_INDEX].balance}</p>
         </div>
-
+  
         <div className="flex justify-between mb-3">
           <p className="text-lg">Bet: ${players[MAIN_PLAYER_INDEX].bet}</p>
           {currentPlayer === MAIN_PLAYER_INDEX && !roundEnded ? (
-            <div className="bg-yellow-500 text-black px-2 py-1 rounded">
-              YOUR TURN
-            </div>
+            <div className="bg-yellow-500 text-black px-2 py-1 rounded">YOUR TURN</div>
           ) : players[MAIN_PLAYER_INDEX].hasFolded ? (
-            <div className="bg-red-500 text-white px-2 py-1 rounded">
-              FOLDED
-            </div>
+            <div className="bg-red-500 text-white px-2 py-1 rounded">FOLDED</div>
           ) : null}
         </div>
-
+  
         {showCardInput && (
           <div className="bg-blue-800 p-3 rounded-lg mb-3">
-            <h4 className="text-center mb-2">Enter your cards (e.g. As for Ace of spades, Kh for King of hearts)</h4>
+            <h4 className="text-center mb-2">
+              Enter your cards (e.g. As for Ace of spades, Kh for King of hearts)
+            </h4>
             <div className="flex justify-center gap-3 mb-3">
               <input
                 type="text"
                 value={card1Input}
                 onChange={(e) => setCard1Input(e.target.value)}
-                placeholder="First card (e.g. Ah)"
+                placeholder="First card (e.g. As)"
                 maxLength="3"
                 className="px-3 py-2 rounded text-black w-24 text-center"
               />
@@ -599,7 +782,7 @@ const Home = () => {
                 type="text"
                 value={card2Input}
                 onChange={(e) => setCard2Input(e.target.value)}
-                placeholder="Second card (e.g. Kd)"
+                placeholder="Second card (e.g. Kh)"
                 maxLength="3"
                 className="px-3 py-2 rounded text-black w-24 text-center"
               />
@@ -614,20 +797,23 @@ const Home = () => {
             </div>
           </div>
         )}
-
+  
         <div className="flex justify-center gap-4">
-          {players[MAIN_PLAYER_INDEX].cards.map((card, cardIndex) => (
-            <div
-              key={cardIndex}
-              className={`bg-white h-24 w-16 rounded-md flex items-center justify-center text-3xl
-                ${card.includes('♥') || card.includes('♦') ? 'text-red-600' : 'text-black'}`}
-            >
-              {card}
-            </div>
-          ))}
+          {players[MAIN_PLAYER_INDEX].cards.map((card, cardIndex) => {
+            const displayCard = getCardSymbol(card);
+            return (
+              <div
+                key={cardIndex}
+                className={`bg-white h-24 w-16 rounded-md flex items-center justify-center text-3xl
+                  ${displayCard.includes('♥') || displayCard.includes('♦') ? 'text-red-600' : 'text-black'}`}
+              >
+                {displayCard}
+              </div>
+            );
+          })}
         </div>
-        
-        {!showCardInput && players[MAIN_PLAYER_INDEX].cards.includes('🂠') && (
+  
+        {!showCardInput && (players[MAIN_PLAYER_INDEX].cards[0] === '🂠' || players[MAIN_PLAYER_INDEX].cards[0] === '') && (
           <div className="text-center mt-3">
             <button
               onClick={() => setShowCardInput(true)}
@@ -638,11 +824,11 @@ const Home = () => {
           </div>
         )}
       </div>
-
+  
       <div className="grid grid-cols-1 md:grid-cols-4 gap-4 mb-6">
         {players.slice(1).map((player, index) => {
           const playerIndex = index + 1;
-
+  
           return (
             <div
               key={player.id}
@@ -661,20 +847,16 @@ const Home = () => {
                 </h3>
                 <p className="text-sm">Balance: ${player.balance}</p>
               </div>
-
+  
               <div className="flex justify-between mb-2">
                 <p className="text-sm">Bet: ${player.bet}</p>
                 {currentPlayer === playerIndex && !roundEnded ? (
-                  <div className="bg-yellow-500 text-xs text-black px-2 py-1 rounded">
-                    ACTIVE
-                  </div>
+                  <div className="bg-yellow-500 text-xs text-black px-2 py-1 rounded">ACTIVE</div>
                 ) : player.hasFolded ? (
-                  <div className="bg-red-500 text-xs text-white px-2 py-1 rounded">
-                    FOLDED
-                  </div>
+                  <div className="bg-red-500 text-xs text-white px-2 py-1 rounded">FOLDED</div>
                 ) : null}
               </div>
-
+  
               <div className="flex justify-center gap-2">
                 {['🂠', '🂠'].map((card, cardIndex) => (
                   <div
@@ -689,10 +871,10 @@ const Home = () => {
           );
         })}
       </div>
-
+  
       <div className="bg-green-900 p-4 rounded-lg">
         <h2 className="text-xl mb-4">Actions</h2>
-
+  
         {!roundEnded ? (
           <div className="flex flex-wrap gap-3">
             <button
@@ -702,7 +884,7 @@ const Home = () => {
             >
               Check
             </button>
-
+  
             {maxBet > 0 && players[currentPlayer].bet < maxBet && (
               <button
                 onClick={call}
@@ -711,7 +893,7 @@ const Home = () => {
                 Call ${maxBet}
               </button>
             )}
-
+  
             <div className="flex gap-2">
               <input
                 type="number"
@@ -727,21 +909,19 @@ const Home = () => {
                 {maxBet > 0 ? "Raise" : "Bet"}
               </button>
             </div>
-
+  
             <button
               onClick={fold}
               className="bg-red-600 hover:bg-red-700 px-4 py-2 rounded"
             >
               Fold
             </button>
-
+  
             <button
               onClick={advanceStage}
               className="bg-purple-600 hover:bg-purple-700 px-4 py-2 rounded ml-auto"
             >
-              Next Stage ({gameStage === 'pre-flop' ? 'Flop' :
-                          gameStage === 'flop' ? 'Turn' :
-                          gameStage === 'turn' ? 'River' : 'Showdown'})
+              Next Stage ({gameStage === 'pre-flop' ? 'Flop' : gameStage === 'flop' ? 'Turn' : gameStage === 'turn' ? 'River' : 'Showdown'})
             </button>
           </div>
         ) : (
@@ -757,6 +937,6 @@ const Home = () => {
       </div>
     </div>
   );
-};
+}  
 
 export default Home;

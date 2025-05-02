@@ -4,9 +4,10 @@ from src.card import Card
 from src.poker_engine import PokerEngine
 from arduino_msg import send_to_arduino
 import os
-
+from flask_cors import CORS
 app = Flask(__name__)
 
+CORS(app)
 @app.route('/analyze', methods=['POST'])
 def analyze():
     try:
